@@ -5,109 +5,31 @@
 set -u
 
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/genmon"
-CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/genmon/network-devices.conf"
 WAN_CACHE="${CACHE_DIR}/wan-ip"
 WAN_TS="${CACHE_DIR}/wan-ip.ts"
-WAN_TTL=60
 
 mkdir -p "$CACHE_DIR"
 
-# Avoid shell aliases (e.g. ip --color=auto) breaking parsing.
-IP() { command ip "$@"; }
+COMMON="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/genmon-network-common.sh"
+# shellcheck source=genmon-network-common.sh
+source "$COMMON"
 
-load_config() {
-  WAN_TTL=60
-  IFACES=()
-  if [[ -f "$CONFIG_FILE" ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      line="${line%%#*}"
-      line="${line#"${line%%[![:space:]]*}"}"
-      line="${line%"${line##*[![:space:]]}"}"
-      [[ -z "$line" ]] && continue
-      if [[ "$line" =~ ^WAN_TTL=([0-9]+)$ ]]; then
-        WAN_TTL="${BASH_REMATCH[1]}"
-        continue
-      fi
-      IFACES+=("$line")
-    done < "$CONFIG_FILE"
-  fi
-}
-
-should_skip_iface() {
-  local name="$1"
-  case "$name" in
-    lo|docker0|podman0|tailscale0|br-*|veth*|virbr*|vethernet*)
-      return 0
-      ;;
-  esac
-  return 1
-}
-
-auto_ifaces() {
-  local name
-  while read -r name _; do
-    should_skip_iface "$name" && continue
-    case "$name" in
-      eth*|enp*|eno*|ens*|wlan*|wlp*|usb*|tun*|tap*|pan*|ppp*|wwan*)
-        printf '%s\n' "$name"
-        ;;
-    esac
-  done < <(IP -o link show | awk -F': ' '{print $2}')
-}
+IP() { genmon_IP "$@"; }
 
 iface_ipv4() {
   IP -4 -o addr show dev "$1" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1
 }
 
-iface_state() {
-  IP -o link show dev "$1" 2>/dev/null | awk -F'[:, ]+' '{for (i=1;i<=NF;i++) if ($i=="state") {print $(i+1); exit}}'
-}
-
-iface_mode() {
-  local mode
-  mode="$(iw dev "$1" info 2>/dev/null | awk '/type /{print $2; exit}')"
-  [[ -n "$mode" ]] && printf '%s' "$mode" || printf 'ethernet'
-}
-
-iface_status_label() {
-  local iface="$1" state mode
-  state="$(iface_state "$iface")"
-  mode="$(iface_mode "$iface")"
-
-  if [[ "$mode" == "monitor" ]]; then
-    printf 'MON'
-    return
-  fi
-
-  case "${state,,}" in
-    up|unknown)
-      if IP link show dev "$iface" 2>/dev/null | grep -q 'LOWER_UP'; then
-        printf 'UP'
-      else
-        printf 'DOWN'
-      fi
-      ;;
-    *)
-      printf 'DOWN'
-      ;;
-  esac
-}
-
-iface_glyph() {
-  case "$1" in
-    UP) printf '↑' ;;
-    DOWN) printf '↓' ;;
-    MON) printf '◎' ;;
-    *) printf '?' ;;
-  esac
-}
+iface_mode() { genmon_iface_mode "$1"; }
+iface_status_label() { genmon_iface_status_label "$1"; }
+iface_glyph() { genmon_iface_glyph "$1"; }
 
 get_wan_ip() {
-  local now ip ts
+  local now ip ts ttl="$GENMON_WAN_TTL"
   now="$(date +%s)"
   if [[ -f "$WAN_CACHE" && -f "$WAN_TS" ]]; then
     ts="$(cat "$WAN_TS" 2>/dev/null || echo 0)"
-    if (( now - ts < WAN_TTL )); then
+    if (( now - ts < ttl )); then
       cat "$WAN_CACHE"
       return
     fi
@@ -165,18 +87,8 @@ vpn_active() {
   return 1
 }
 
-copy_cmd() {
-  local value="$1"
-  if command -v xclip >/dev/null 2>&1; then
-    printf "sh -c 'printf %s | xclip -selection clipboard'" "$value"
-  fi
-}
-
-load_config
-
-if ((${#IFACES[@]} == 0)); then
-  mapfile -t IFACES < <(auto_ifaces)
-fi
+genmon_discover_ifaces
+IFACES=("${GENMON_IFACES[@]}")
 
 wan="$(get_wan_ip)"
 lan_ip=""
@@ -230,20 +142,15 @@ fi
 [[ -n "$iface_summary" ]] && panel_txt="${panel_txt} · ${iface_summary}"
 
 if vpn_active "${IFACES[@]}"; then
-  icon="network-vpn-symbolic"
   tooltip_lines+=("" "VPN: active")
 else
-  icon="network-transmit-receive-symbolic"
   tooltip_lines+=("" "VPN: off")
 fi
 
+tooltip_lines+=("" "Click text: set UP / DOWN / MON")
+
 tooltip="$(printf '%s\n' "${tooltip_lines[@]}")"
 
-printf '<icon>%s</icon>' "$icon"
 printf '<txt>%s</txt>' "$panel_txt"
 printf '<tool>%s</tool>' "$tooltip"
-
-if copy_cmd="$(copy_cmd "$wan")"; then
-  printf '<iconclick>%s</iconclick>' "$copy_cmd"
-  printf '<txtclick>%s</txtclick>' "$copy_cmd"
-fi
+printf '<txtclick>%s</txtclick>' "${HOME}/.local/bin/genmon-network-action.sh"
