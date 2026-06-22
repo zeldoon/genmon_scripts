@@ -1,18 +1,48 @@
 # genmon_scripts
 Some genmon scripts for xfce4 that I find useful on kali
 
-# Need to do
-So you will need to pick some icons for the scripts as I have not put in default icon locations
+## Recommended: unified script
 
-# Some info about genmon scripts
-I would of loved to have had all these basic scripts put into one program but genmon does not like to pump out a lot of information so they have been seperated. They are put into function format if you would like to use them elsewhere
+`genmon-network-status.sh` replaces the three older scripts with one panel widget that shows:
 
-# What the scripts do
-genmon-show-down.sh will show you which interfaces are down so you can bring them up if need be
-	
-genmon-show-up.sh will show you all interfaces that are up and give you the local ip for them
-	
-genmon-vpn-show-ip.sh will show you your WAN ip and will display different icons depending on the fact if your vpn is active
+- **WAN IP** (cached, click to copy)
+- **LAN IP** (primary active interface)
+- **Per-interface status**: `↑` up, `↓` down, `◎` monitor mode
+- **Tooltip** with full interface list, IPv4, and wireless mode
+- **VPN icon** when a `tun`/`tap` interface is active
 
-# At some point...
-At some point I would like to have click events to bring devices down, bring devices up, put devices in monitor mode ... only problem is there seem to be a lot of un-documented limitations to genmon scripts
+### Install
+
+```bash
+cp genmon-network-status.sh ~/.local/bin/
+chmod +x ~/.local/bin/genmon-network-status.sh
+mkdir -p ~/.config/genmon
+```
+
+Point your xfce4-genmon plugin at `~/.local/bin/genmon-network-status.sh` and set update period to ~3000ms.
+
+### Optional config
+
+`~/.config/genmon/network-devices.conf`:
+
+```
+# WAN_TTL=60
+eth0
+wlan0
+wlan1
+pan1
+```
+
+Leave the file empty (or comment all interfaces) to auto-detect network devices.
+
+## Legacy scripts
+
+These still work but are superseded by `genmon-network-status.sh`:
+
+- `genmon-show-down.sh` — interfaces that are down
+- `genmon-show-up.sh` — interfaces that are up + local IPs
+- `genmon-vpn-show-ip.sh` — WAN IP + VPN on/off icon
+
+## Notes
+
+Genmon works best with compact panel output and richer detail in the tooltip. The unified script follows that pattern and caches WAN lookups so it does not curl on every 1s poll.
