@@ -1,0 +1,14 @@
+# Optional genmon network settings (interfaces are auto-detected each refresh).
+#
+# WAN IP cache TTL in seconds (default 60):
+# WAN_TTL=90
+#
+# Hide interfaces (prefix with -):
+# -hci0
+#
+# Force-include devices auto-detect might miss (prefix with +):
+# Phone Bluetooth PAN (if not pan0/pan1):
+# +pan2
+# USB cellular modem:
+# +wwan0
+# +cdc-wdm0
