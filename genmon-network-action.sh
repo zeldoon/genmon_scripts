@@ -110,13 +110,19 @@ run_menu() {
   genmon_discover_ifaces
   ((${#GENMON_IFACES[@]})) || { notify "No interfaces found."; return 1; }
 
-  local -a iface_items=() iface current ip mode
+  local -a iface_items=() iface current ip mode label menu_label
   for iface in "${GENMON_IFACES[@]}"; do
     current="$(genmon_iface_status_label "$iface")"
     ip="$(genmon_IP -4 -o addr show dev "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
     mode="$(genmon_iface_mode "$iface")"
+    label="$(genmon_iface_display_name "$iface")"
     [[ -z "$ip" ]] && ip="no-ip"
-    iface_items+=("$iface" "${current}  ${ip}  ${mode}")
+    if [[ "$label" != "$iface" ]]; then
+      menu_label="${label}  ${current}  ${ip}  ${mode}  (${iface})"
+    else
+      menu_label="${label}  ${current}  ${ip}  ${mode}"
+    fi
+    iface_items+=("$iface" "$menu_label")
   done
 
   local pick

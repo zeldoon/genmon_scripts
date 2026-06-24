@@ -4,31 +4,39 @@ xfce4-genmon panel scripts for Kali / Raspberry Pi setups. The main widget repla
 
 ## What it's for
 
-Live network situational awareness on the XFCE panel: public IP, local IP, and every important interface at a glance — without opening a terminal. Built for field rigs (Pi + phone tether, WiFi, Ethernet, VPN, monitor mode) where you want status and control in one place.
+Live network situational awareness on the XFCE panel: public IP, every local IP, and every important interface at a glance — without opening a terminal. Built for field rigs (Pi + phone tether, WiFi, Ethernet, Bluetooth PAN, VPN, monitor mode) where you want status and control in one place.
 
 ## What it shows
 
 **Panel (always visible, one line):**
 
 ```
-74.77.226.88 · 192.168.1.66 · pan1↑  wlan0↑  eth0↓
+74.77.226.88 · 192.168.1.205 · 10.42.0.1 · eth0  hci0  wlan0 · VPN
 ```
 
 | Part | Meaning |
 |------|---------|
-| `74.77.226.88` | WAN / public IP (cached) |
-| `192.168.1.66` | Primary LAN IP |
-| `pan1↑` | Interface name + state glyph |
-| `wlan0↑` | `↑` up · `↓` down · `◎` monitor |
+| `74.77.226.88` | WAN / public IP (cached, white) |
+| `192.168.1.205` | LAN IP on WiFi (white) |
+| `10.42.0.1` | LAN IP on Bluetooth PAN (white) |
+| `eth0` | Interface name, **red** = down |
+| `hci0` | Interface name, **green** = up |
+| `wlan0` | Interface name, **green** = up |
+| `VPN` | **green** = active, **red** = off |
 
-**Hover tooltip:** full breakdown per interface (status, IPv4, wireless mode), VPN on/off, and click hint.
+Interface names are color-coded: **green** = UP, **red** = DOWN, **orange** = MON (monitor mode). IPs stay uncolored. Every UP interface with an IPv4 address is listed on the panel (not just one “primary” LAN).
+
+**Hover tooltip:** WAN, all LAN lines (with connection labels like SSID or BT profile name), per-interface status/IP/mode, VPN on/off, and click hint.
 
 **Click panel text:** action menu to set any device **UP**, **DOWN**, or **MON** (monitor mode on wireless).
 
 ## Features
 
 - **Single panel widget** — replaces `genmon-show-up.sh`, `genmon-show-down.sh`, and `genmon-vpn-show-ip.sh`
-- **Auto-detect interfaces** — new USB WiFi, phone PAN (`pan*`), VPN (`tun*`/`tap*`), cellular (`wwan*`) appear automatically
+- **Auto-detect interfaces** — new USB WiFi, Bluetooth PAN (`hci*`/`bnep*`/`pan*`), VPN (`tun*`/`tap*`), cellular (`wwan*`) appear automatically
+- **All LAN IPs on panel** — WiFi, Ethernet, BT PAN, VPN tunnel addresses shown together
+- **Color-coded interface names** — no arrow glyphs on the panel line
+- **VPN indicator** — colored `VPN` label at the end of the panel
 - **WAN IP caching** — configurable TTL; no curl on every poll
 - **Rich hover tooltip** — details without cluttering the panel
 - **Click-to-control** — set interface state UP / DOWN / MON from a whiptail menu
@@ -76,7 +84,7 @@ Interfaces are **auto-detected** each refresh. Edit `~/.config/genmon/network-de
 WAN_TTL=90
 
 # Hide interfaces (prefix with -)
--hci0
+-pan1
 
 # Force-include devices auto-detect might miss (prefix with +)
 +cdc-wdm0
@@ -85,10 +93,10 @@ WAN_TTL=90
 
 ### Phone tether (Bluetooth PAN)
 
-Most phones expose `pan0` or `pan1` when BT tethering is active — already matched by `pan*` and shows up automatically. If your phone uses a different name:
+Bluetooth NAP usually shows as `hci0` (and optionally `bnep0`). Connection names (e.g. `rpi5`) appear in the tooltip via NetworkManager. Hide stale PAN profiles if needed:
 
 ```ini
-+pan2
+-pan1
 ```
 
 ### USB / cellular modem
@@ -107,50 +115,25 @@ cdc*|rmnet*|wwan*
 
 ## Customization examples
 
-### Change state glyphs
+### Change interface colors
 
-Edit `genmon_iface_glyph()` in `genmon-network-common.sh`:
+Edit `genmon_iface_name_markup()` in `genmon-network-common.sh`:
 
 ```bash
-genmon_iface_glyph() {
-  case "$1" in
-    UP)   printf '▲' ;;
-    DOWN) printf '▼' ;;
-    MON)  printf '◉' ;;
-    *)    printf '?' ;;
+genmon_iface_name_markup() {
+  local iface="$1" status="$2"
+  case "$status" in
+    UP)   printf "<span foreground='#2ecc71'>%s</span>" "$iface" ;;
+    DOWN) printf "<span foreground='#e74c3c'>%s</span>" "$iface" ;;
+    MON)  printf "<span foreground='#f39c12'>%s</span>" "$iface" ;;
+    *)    printf '%s' "$iface" ;;
   esac
 }
 ```
 
 ### Change panel separators
 
-In `genmon-network-status.sh`, find the `panel_txt=` lines and swap ` · ` for ` | ` or drop interface summary:
-
-```bash
-# WAN + LAN only (hide per-interface glyphs on the panel line)
-panel_txt="${wan} · ${lan_ip}"
-# remove or comment out: [[ -n "$iface_summary" ]] && panel_txt=...
-```
-
-### Prefer phone tether IP as LAN
-
-`pick_lan()` chooses the displayed LAN IP. Put PAN/tun before WiFi by adding at the top of the priority loops:
-
-```bash
-for iface in "$@"; do
-  case "$iface" in
-    pan*) priority+=("$iface") ;;
-  esac
-done
-```
-
-### Colored tooltip (Pango markup)
-
-Genmon supports Pango in `<tool>` text. Example in `genmon-network-status.sh`:
-
-```bash
-tooltip_lines+=("  <span foreground='#2ecc71'>wlan0  UP</span>  192.168.1.66  managed")
-```
+In `genmon-network-status.sh`, swap ` · ` for ` | ` in the `panel_txt` assembly.
 
 ### Shorter WAN cache for roaming setups
 
