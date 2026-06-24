@@ -23,6 +23,8 @@ iface_ipv4() {
 iface_mode() { genmon_iface_mode "$1"; }
 iface_status_label() { genmon_iface_status_label "$1"; }
 iface_glyph() { genmon_iface_glyph "$1"; }
+iface_glyph_markup() { genmon_iface_glyph_markup "$1"; }
+iface_display_name() { genmon_iface_display_name "$1"; }
 
 get_wan_ip() {
   local now ip ts ttl="$GENMON_WAN_TTL"
@@ -45,109 +47,147 @@ get_wan_ip() {
   printf '%s' "$ip"
 }
 
-pick_lan() {
-  local iface ip status
-  local -a priority=()
+lan_priority_order() {
+  local iface
+  LAN_PRIORITY=()
   for iface in "$@"; do
     case "$iface" in
-      tun*|tap*) priority+=("$iface") ;;
+      tun*|tap*) LAN_PRIORITY+=("$iface") ;;
     esac
   done
   for iface in "$@"; do
     case "$iface" in
-      wlan*|wlp*) priority+=("$iface") ;;
+      wlan*|wlp*) LAN_PRIORITY+=("$iface") ;;
     esac
   done
   for iface in "$@"; do
     case "$iface" in
-      eth*|enp*|eno*|ens*|usb*) priority+=("$iface") ;;
+      eth*|enp*|eno*|ens*|usb*) LAN_PRIORITY+=("$iface") ;;
     esac
   done
   for iface in "$@"; do
-    priority+=("$iface")
+    case "$iface" in
+      hci*|bnep*|pan*) LAN_PRIORITY+=("$iface") ;;
+    esac
   done
+  for iface in "$@"; do
+    LAN_PRIORITY+=("$iface")
+  done
+}
 
-  for iface in "${priority[@]}"; do
+# Every UP iface with an IPv4 (shared by panel + tooltip).
+collect_lan_ips() {
+  local iface ip status
+  local -a ips=()
+  local -A seen_ip=()
+
+  lan_priority_order "$@"
+  for iface in "${LAN_PRIORITY[@]}"; do
     status="$(iface_status_label "$iface")"
     [[ "$status" == "DOWN" || "$status" == "MON" ]] && continue
     ip="$(iface_ipv4 "$iface")"
     [[ -n "$ip" ]] || continue
-    printf '%s|%s' "$ip" "$iface"
-    return 0
+    [[ -n "${seen_ip[$ip]:-}" ]] && continue
+    seen_ip["$ip"]=1
+    ips+=("$ip")
   done
-  return 1
+  ((${#ips[@]})) || return 1
+  printf '%s\n' "${ips[@]}"
 }
 
-vpn_active() {
-  local iface
-  for iface in "$@"; do
-    [[ "$iface" == tun* || "$iface" == tap* ]] || continue
-    [[ "$(iface_status_label "$iface")" != "DOWN" ]] && return 0
+collect_lan_entries() {
+  local iface ip status label
+  local -a entries=()
+  local -A seen_ip=()
+
+  lan_priority_order "$@"
+  for iface in "${LAN_PRIORITY[@]}"; do
+    status="$(iface_status_label "$iface")"
+    [[ "$status" == "DOWN" || "$status" == "MON" ]] && continue
+    ip="$(iface_ipv4 "$iface")"
+    [[ -n "$ip" ]] || continue
+    [[ -n "${seen_ip[$ip]:-}" ]] && continue
+    seen_ip["$ip"]=1
+    label="$(iface_display_name "$iface")"
+    entries+=("LAN: ${ip} (${label})")
   done
-  return 1
+  ((${#entries[@]})) || return 1
+  printf '%s\n' "${entries[@]}"
 }
+
+vpn_active() { genmon_vpn_active; }
+vpn_panel_markup() { genmon_vpn_panel_markup; }
 
 genmon_discover_ifaces
 IFACES=("${GENMON_IFACES[@]}")
 
 wan="$(get_wan_ip)"
-lan_ip=""
-lan_iface=""
-if lan_info="$(pick_lan "${IFACES[@]}")"; then
-  lan_ip="${lan_info%%|*}"
-  lan_iface="${lan_info##*|}"
+declare -a panel_ip_parts=("$wan")
+if lan_ip_list="$(collect_lan_ips "${IFACES[@]}")"; then
+  while IFS= read -r ip; do
+    [[ -n "$ip" ]] && panel_ip_parts+=("$ip")
+  done <<< "$lan_ip_list"
 fi
 
-declare -a up_parts=()
-declare -a down_parts=()
-declare -a mon_parts=()
-tooltip_lines=("Network status" "──────────────" "WAN: ${wan}")
+TOOLTIP_RULE='──────────────'
+declare -a iface_parts=()
+tooltip_lines=("WAN: ${wan}")
 
-if [[ -n "$lan_ip" ]]; then
-  tooltip_lines+=("LAN: ${lan_ip} (${lan_iface})")
+if lan_lines="$(collect_lan_entries "${IFACES[@]}")"; then
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && tooltip_lines+=("$line")
+  done <<< "$lan_lines"
 else
   tooltip_lines+=("LAN: none")
 fi
 
-tooltip_lines+=("" "Interfaces:")
+tooltip_lines+=("$TOOLTIP_RULE" "Interfaces:")
 
 for iface in "${IFACES[@]}"; do
   status="$(iface_status_label "$iface")"
-  glyph="$(iface_glyph "$status")"
   ip="$(iface_ipv4 "$iface")"
   mode="$(iface_mode "$iface")"
+  label="$(iface_display_name "$iface")"
   [[ -z "$ip" ]] && ip="—"
 
-  tooltip_lines+=("  ${iface}  ${status}  ${ip}  ${mode}")
+  if [[ "$label" != "$iface" ]]; then
+    tooltip_lines+=("  ${iface}  ${status}  ${ip}  ${mode} · ${label}")
+  else
+    tooltip_lines+=("  ${iface}  ${status}  ${ip}  ${mode}")
+  fi
 
-  case "$status" in
-    UP) up_parts+=("${iface}${glyph}") ;;
-    DOWN) down_parts+=("${iface}${glyph}") ;;
-    MON) mon_parts+=("${iface}${glyph}") ;;
-  esac
+  genmon_hide_from_panel_summary "$iface" && continue
+  iface_parts+=("$(genmon_iface_name_markup "$iface" "$status")")
 done
 
-summary_parts=()
-((${#up_parts[@]})) && summary_parts+=("${up_parts[*]}")
-((${#mon_parts[@]})) && summary_parts+=("${mon_parts[*]}")
-((${#down_parts[@]})) && summary_parts+=("${down_parts[*]}")
-iface_summary="${summary_parts[*]}"
-iface_summary="${iface_summary// /  }"
-
-if [[ -n "$lan_ip" ]]; then
-  panel_txt="${wan} · ${lan_ip}"
-else
-  panel_txt="${wan}"
+iface_summary=""
+if ((${#iface_parts[@]})); then
+  iface_summary="${iface_parts[0]}"
+  for ((i = 1; i < ${#iface_parts[@]}; i++)); do
+    iface_summary+="  ${iface_parts[i]}"
+  done
 fi
+
+panel_txt="${panel_ip_parts[0]}"
+for ((i = 1; i < ${#panel_ip_parts[@]}; i++)); do
+  panel_txt+=" · ${panel_ip_parts[i]}"
+done
 [[ -n "$iface_summary" ]] && panel_txt="${panel_txt} · ${iface_summary}"
+panel_txt="${panel_txt} · $(vpn_panel_markup)"
 
-if vpn_active "${IFACES[@]}"; then
-  tooltip_lines+=("" "VPN: active")
+tooltip_lines+=("$TOOLTIP_RULE")
+if vpn_active; then
+  vpn_name="$(genmon_vpn_label 2>/dev/null || true)"
+  if [[ -n "$vpn_name" ]]; then
+    tooltip_lines+=("VPN: on (${vpn_name})")
+  else
+    tooltip_lines+=("VPN: on")
+  fi
 else
-  tooltip_lines+=("" "VPN: off")
+  tooltip_lines+=("VPN: off")
 fi
 
-tooltip_lines+=("" "Click text: set UP / DOWN / MON")
+tooltip_lines+=("$TOOLTIP_RULE" "Click to set UP / DOWN / MON")
 
 tooltip="$(printf '%s\n' "${tooltip_lines[@]}")"
 
