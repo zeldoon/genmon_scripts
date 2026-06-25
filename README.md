@@ -11,12 +11,12 @@ Live network situational awareness on the XFCE panel: public IP, every local IP,
 **Panel (always visible, one line):**
 
 ```
-74.77.226.88 · 192.168.1.205 · 10.42.0.1 · eth0  hci0  wlan0 · VPN
+74.77.xxx.xxx · 192.168.1.205 · 10.42.0.1 · eth0  hci0  wlan0 · VPN
 ```
 
 | Part | Meaning |
 |------|---------|
-| `74.77.226.88` | WAN / public IP (cached, white) |
+| `74.77.xxx.xxx` | WAN / public IP (cached, white) |
 | `192.168.1.205` | LAN IP on WiFi (white) |
 | `10.42.0.1` | LAN IP on Bluetooth PAN (white) |
 | `eth0` | Interface name, **red** = down |
